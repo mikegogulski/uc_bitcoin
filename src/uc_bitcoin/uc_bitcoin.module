@@ -339,7 +339,7 @@ function uc_bitcoin_cron() {
       uc_order_update_status($order_id, "canceled");
       // TODO: Verify working
       $cancelmsg = t("Your payment was not completed with at least !confirms within !timeout hours. Your order has been cancelled. If you have made a partial payment, please contact the shop administrator for a refund.", array(
-        '%confirms' => format_plural(variable_get("uc_bitcoin_transaction_confirms", 1), "one confirmation", "@count confirmations"),
+        '!confirms' => format_plural(variable_get("uc_bitcoin_transaction_confirms", 1), "one confirmation", "@count confirmations"),
         '!timeout' => variable_get("uc_bitcoin_transaction_timeout", 72),
       ));
       uc_order_comment_save($my_order->order_id, 9999999, $cancelmsg, 'order', 'canceled', TRUE);
