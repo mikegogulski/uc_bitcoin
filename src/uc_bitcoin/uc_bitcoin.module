@@ -9,9 +9,12 @@
  *
  * @author Mike Gogulski - http://www.nostate.com/ http://www.gogulski.com/
  */
-variable_get('uc_payment_logging', TRUE);
-// TODO: validate with _validate($form, &$form_state)
-function uc_bitcoin_settings() {
+variable_set('uc_payment_logging', TRUE);
+
+/**
+ * Set up the Bitcoin payment method settings form.
+ */
+function uc_bitcoin_settings_form() {
   $form = array();
 
   $form['server'] = array(
@@ -66,7 +69,7 @@ function uc_bitcoin_settings() {
     '#type' => 'textfield',
     '#title' => t('Transaction timeout (hours)'),
     '#default_value' => variable_get('uc_bitcoin_transaction_timeout', '72'),
-    '#description' => t('Transactions not paid for within this number of hours will be automatically cancelled.'),
+    '#description' => t('Transactions not paid for within this number of hours will be automatically cancelled. Decimals are permitted.'),
   );
   $form['transaction']['uc_bitcoin_transaction_confirms'] = array(
     '#type' => 'textfield',
@@ -75,6 +78,40 @@ function uc_bitcoin_settings() {
     '#description' => t('Minimum number of Bitcoin transaction network confirmations required before a payment is considered accepted.'),
   );
   return system_settings_form($form);
+}
+
+/**
+ * Validate Bitcoin payment method settings.
+ * @param unknown_type $form
+ * @param unknown_type $form_state
+ */
+function uc_payment_methods_form_validate($form, &$form_state) {
+  $c = $form_state['values']['uc_bitcoin_server_scheme'];
+  if ($c != 'http' && $c != 'https')
+    form_set_error('uc_bitcoin_server_scheme', t('Server scheme must be HTTP or HTTPS.'));
+  if ($c == 'https') {
+    $c = $form_state['values']['uc_bitcoin_server_certificate_path'];
+    if (!empty($c) && !is_readable($c))
+      form_set_error('uc_bitcoin_server_certificate_path', t('SSL certificate file unreadable. Try using an absolute path.'));
+  }
+  $c = $form_state['values']['uc_bitcoin_server_username'];
+  if (empty($c))
+    form_set_error('uc_bitcoin_server_username', t('Server username is required.'));
+  $c = $form_state['values']['uc_bitcoin_server_password'];
+  if (empty($c))
+    form_set_error('uc_bitcoin_server_password', t('Server password is required.'));
+  $c = $form_state['values']['uc_bitcoin_server_hostname'];
+  if (empty($c))
+    form_set_error('uc_bitcoin_server_hostname', t('Server hostname is required.'));
+  $c = $form_state['values']['uc_bitcoin_server_port'];
+  if (empty($c) || !is_numeric($c) || $c < 0 || $c > 65535 || floatval($c) != intval($c))
+    form_set_error('uc_bitcoin_server_port', t('Server port must be an integer and between 0 and 65535.'));
+  $c = $form_state['values']['uc_bitcoin_transaction_timeout'];
+  if (empty($c) || !is_numeric($c) || $c <= 0)
+    form_set_error('uc_bitcoin_transaction_timeout', t('Transaction timeout must be greater than zero.'));
+  $c = $form_state['values']['uc_bitcoin_transaction_confirms'];
+  if (empty($c) || !is_numeric($c) || $c < 0 || floatval($c) != intval($c))
+    form_set_error('uc_bitcoin_transaction_confirms', t('Required transaction confirmations must be an integer greater than or equal to zero.'));
 }
 
 /*******************************************************************************
@@ -102,6 +139,33 @@ function uc_bitcoin_menu() {
  ******************************************************************************/
 
 /**
+ * Implementation of hook_mail_alter().
+ * @param array $&message
+ * @todo Make this less fragile.
+ *
+ * The idea here is to transform:
+ *
+ *   (t('Payment Method:'))(not 'Bitcoin')'Bitcoin'
+ *
+ * to
+ *
+ *   \1\2Bitcoin -- send payment to...
+ *
+ * But only for invoice emails.
+ */
+function uc_bitcoin_mail_alter(&$message) {
+  if ($message['id'] == 'uc_order_action-mail' && !strstr(uc_store_email_from(), $message['to'])) {
+    // fragile
+    $bits = explode(" ", $_SESSION['messages']['status'][0]);
+    $address = trim($bits[count($bits) - 1], ' .');
+    // also looks fragile, no idea if it's really t()-safe
+    $message['body'] = preg_replace('/(' . t('Payment Method:') . ')(.*)Bitcoin/s',
+      '${1}${2}Bitcoin (' . t("send payment to Bitcoin address !address.", array("!address" => $address)) . ')',
+      $message['body']);
+  }
+}
+
+/**
  * Implementation of hook_order().
  */
 function uc_bitcoin_order($op, &$arg1, $arg2) {
@@ -120,15 +184,14 @@ function uc_bitcoin_order($op, &$arg1, $arg2) {
       // TODO: better address validation
       // https://www.bitcoin.org/smf/index.php?topic=1026.0 has PHP code, but it depends on the GMP extension
       if (!$address || empty($address) || strlen($address) < 27 || strlen($address) > 40)
-        return array(array('pass' => FALSE, 'message' => t('The Bitcoin server returned an invalid address. Please contact the site administrator.')));
+        return array(array(
+          'pass' => FALSE,
+          'message' => t('The Bitcoin server returned an invalid address. Please contact the site administrator.')
+        ));
       db_query("INSERT INTO {uc_payment_bitcoin} (order_id, bitcoin_address) VALUES (%d, '%s')", $arg1->order_id, $address);
       $message = t('Please send your payment of BTC @total to Bitcoin address @address.', array(
         '@address' => $address,
         '@total' => $arg1->order_total));
-      uc_order_comment_save($arg1->order_id, 9999999, $message, 'order', 'pending', TRUE);
-      // TODO: this is cheating...
-      uc_order_update_status($arg1->order_id, "pending");
-      ca_pull_trigger('uc_order_status_email_update', $arg1);
       return array(array(
         'pass' => TRUE,
         'message' => $message));
@@ -177,24 +240,25 @@ function uc_payment_method_bitcoin($op, &$arg1) {
       return t('Bitcoin address for payment: !address', array('!address' => $address));
       // Add Bitcoin settings to the payment methods settings form.
       case 'settings':
-      return uc_bitcoin_settings();
+      return uc_bitcoin_settings_form();
   }
 }
 
 /**
- * create a jsonrpc_client object to talk to the bitcoin server and return it, or false on failure
+ * Create a jsonrpc_client object to talk to the bitcoin server and return it, or false on failure.
  * @return boolean|jsonrpc_client
+ * @todo Add an argument to use in logging which function called it on failure... or figure out the caller itself.
  */
-function _uc_bitcoin_get_bitcoin_client() {
+function _uc_bitcoin_get_bitcoin_client($debug_level = 0) {
   require_once("xmlrpc.inc");
   require_once("jsonrpc.inc");
-  $uri = variable_get('uc_bitcoin_server_scheme', '') . "://" .
-    variable_get('uc_bitcoin_server_username', '') . ":" .
-    variable_get('uc_bitcoin_server_password', '') . "@" .
-    variable_get('uc_bitcoin_server_hostname', '') . ":" .
-    variable_get('uc_bitcoin_server_port', '') . "/";
+  $uri = variable_get('uc_bitcoin_server_scheme', 'http') . "://" .
+    variable_get('uc_bitcoin_server_username', 'not') . ":" .
+    variable_get('uc_bitcoin_server_password', 'configured') . "@" .
+    variable_get('uc_bitcoin_server_hostname', 'localhost') . ":" .
+    variable_get('uc_bitcoin_server_port', '8332') . "/";
   $client = new jsonrpc_client($uri);
-  //$client->setDebug(2);
+  $client->setDebug($debug_level);
   $client->setSSLVerifyHost(0);
   if (variable_get('uc_bitcoin_server_scheme', '') == "https")
     if (strlen(variable_get('uc_bitcoin_server_certificate_path', '')))
@@ -210,19 +274,21 @@ function _uc_bitcoin_get_bitcoin_client() {
   return $client;
 }
 
+/**
+ * Check for and try to process pending Bitcoin transactions.
+ */
 function uc_bitcoin_cron() {
   // TODO: Figure out how to handle user-modified order statuses
   $result = db_query("SELECT {uc_orders}.order_id,order_total,bitcoin_address FROM {uc_orders} LEFT JOIN {uc_payment_bitcoin} ON {uc_orders}.order_id={uc_payment_bitcoin}.order_id WHERE payment_method='bitcoin' and order_status='pending'");
   // TODO: test if $result has any rows
 
   // prepare the JSON-RPC client
-  if (!$bitcoin_client = _uc_bitcoin_get_bitcoin_client())
+  if (!$bitcoin_client = _uc_bitcoin_get_bitcoin_client(1))
     return;
   // loop through the open transactions
-  $bitcoin_client->setDebug(1);
-  while ($order = db_fetch_object($result)) {
+  while ($my_order = db_fetch_object($result)) {
     // check for transaction completion
-    $address = $order->bitcoin_address;
+    $address = $my_order->bitcoin_address;
     $m = new jsonrpcmsg("getreceivedbyaddress");
     $m->addParam(new jsonrpcval($address));
     $m->addParam(new jsonrpcval(variable_get("uc_bitcoin_transaction_confirms", 1), "int"));
@@ -236,20 +302,11 @@ function uc_bitcoin_cron() {
       continue;
     }
     $paid = $r->value()->scalarVal();
+    $order_id = $my_order->order_id;
+    $order = uc_order_load($order_id);
     $order_balance = uc_payment_balance($order);
-    $order_total = $order->order_total;
-    $order_id = $order->order_id;
+    $order_total = $my_order->order_total;
     // TODO: Handle overpayment
-    // TODO: test an overpayment
-    // a - (b - c) == a - (b + -c) = a + -(b + -c) = a + -b - -c = a - b + c
-    // total: 10, balance: 2, paid: 8
-    // do nothing
-    // total: 10, balance: 2, paid: 11
-    // new payment for 1
-    // 3 != 100-10
-    // paid: 10
-    // 10
-    // t: 10 b: 10, p: 0
     // if the amount paid has changed, log a payment
     if ($order_total != $paid + $order_balance)
       uc_payment_enter($order_id, "bitcoin", $paid - ($order_total - $order_balance), 0, NULL, '');
@@ -276,16 +333,16 @@ function uc_bitcoin_cron() {
     }
     $label = $r->value()->scalarVal();
     list($junk, $junk1, $timestamp) = explode(" ", $label);
-    if (time() > ($timestamp + ((int)variable_get("uc_bitcoin_transaction_timeout", 72) * 60 * 60))) {
+    if (time() > ($timestamp + intval(floatval(variable_get("uc_bitcoin_transaction_timeout", 72) * 60 * 60)))) {
       // ORDER EXPIRED
       // TODO: Handle refund of partial payment
       uc_order_update_status($order_id, "canceled");
       // TODO: Verify working
-      $cancelmsg = t("Your payment was not completed with at least %confirms within !timeout hours. Your order has been cancelled. If you have made a partial payment, please contact the shop administrator for a refund.", array(
-      	'%confirms' => format_plural(variable_get("uc_bitcoin_transaction_confirms", 1), "one confirmation", "@count confirmations"),
-      	'!timeout' => variable_get("uc_bitcoin_transaction_timeout", 72),
+      $cancelmsg = t("Your payment was not completed with at least !confirms within !timeout hours. Your order has been cancelled. If you have made a partial payment, please contact the shop administrator for a refund.", array(
+        '%confirms' => format_plural(variable_get("uc_bitcoin_transaction_confirms", 1), "one confirmation", "@count confirmations"),
+        '!timeout' => variable_get("uc_bitcoin_transaction_timeout", 72),
       ));
-      uc_order_comment_save($order->order_id, 9999999, $cancelmsg, 'order', 'canceled', TRUE);
+      uc_order_comment_save($my_order->order_id, 9999999, $cancelmsg, 'order', 'canceled', TRUE);
       ca_pull_trigger('uc_order_status_email_update', $order);
     }
   }
