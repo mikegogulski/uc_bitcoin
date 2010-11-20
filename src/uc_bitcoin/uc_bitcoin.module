@@ -9,7 +9,7 @@
  *
  * @author Mike Gogulski - http://www.nostate.com/ http://www.gogulski.com/
  */
-variable_set('uc_payment_logging', TRUE);
+//variable_set('uc_payment_logging', TRUE);
 
 /**
  * Set up the Bitcoin payment method settings form.
@@ -283,7 +283,7 @@ function uc_bitcoin_cron() {
   // TODO: test if $result has any rows
 
   // prepare the JSON-RPC client
-  if (!$bitcoin_client = _uc_bitcoin_get_bitcoin_client(1))
+  if (!$bitcoin_client = _uc_bitcoin_get_bitcoin_client())
     return;
   // loop through the open transactions
   while ($my_order = db_fetch_object($result)) {
