@@ -1,8 +1,6 @@
 <?php
 // $Id$
 
-//include_once('uc_bitcoin.ca.inc');
-
 /**
  * @file
  * Bitcoin payment method.
@@ -76,6 +74,10 @@ function uc_bitcoin_settings_form() {
     '#title' => t('Transaction confirmations'),
     '#default_value' => variable_get('uc_bitcoin_transaction_confirms', '1'),
     '#description' => t('Minimum number of Bitcoin transaction network confirmations required before a payment is considered accepted.'),
+  );
+  $form['donate'] = array(
+    '#type' => 'item',
+    '#title' => t('Like this plugin? Your gift of Bitcoins to 1DDuMEPaQzdH3vLTiQwQvACgnv7tR25SpE would be greatly appreciated. Other ways to send a gift can be found <a href="http://www.nostate.com/support-nostatecom/">here</a>. Thank you!'),
   );
   return system_settings_form($form);
 }
@@ -171,23 +173,26 @@ function uc_bitcoin_mail_alter(&$message) {
 function uc_bitcoin_order($op, &$arg1, $arg2) {
   switch ($op) {
     case 'submit':
-      $bitcoin_client = _uc_bitcoin_get_bitcoin_client();
-      if (!$bitcoin_client)
-        return array(array('pass' => FALSE, 'message' => t('The Bitcoin server is presently unavailable. Please contact the site administrator.')));
-      // stuff the order id, the total order price and a timestamp into the bitcoin address's label
-      $label = $arg1->order_id . " " . number_format($arg1->order_total, 2, ".", "") . " " . time();
-      $m = new jsonrpcmsg("getnewaddress", array(new jsonrpcval($label, "string")));
-      $r = $bitcoin_client->send($m);
-      if ($r->faultCode())
-        return array(array('pass' => FALSE, 'message' => t('The Bitcoin server was unable to generate an address for your payment. Please contact the site administrator.')));
-      $address = $r->value()->scalarVal();
-      // TODO: better address validation
-      // https://www.bitcoin.org/smf/index.php?topic=1026.0 has PHP code, but it depends on the GMP extension
-      if (!$address || empty($address) || strlen($address) < 27 || strlen($address) > 40)
+      include_once("bitcoin.inc");
+      $bitcoin_client = new BitcoinClient();
+      if (TRUE !== ($fault = $bitcoin_client->can_connect())) {
+        watchdog('uc_bitcoin_order', 'Unable to access Bitcoin server. Fault: !fault', $fault);
         return array(array(
           'pass' => FALSE,
-          'message' => t('The Bitcoin server returned an invalid address. Please contact the site administrator.')
-        ));
+          'message' => t('The Bitcoin server is presently unavailable. Please contact the site administrator.')));
+      }
+      // stuff the order id, the total order price and a timestamp into the bitcoin address's label
+      $label = $arg1->order_id . " " . number_format($arg1->order_total, 2, ".", "") . " " . time();
+      try {
+        $address = $bitcoin_client->query("getnewaddress");
+      } catch (BitcoinClientException $e) {
+        watchdog('uc_bitcoin_order', 'getnewaddress failed. Fault: !fault', $fault);
+        return array(array('pass' => FALSE, 'message' => t('The Bitcoin server is presently unavailable. Please contact the site administrator.')));
+      }
+      if (!Bitcoin::checkAddress($address))
+        return array(array(
+          'pass' => FALSE,
+          'message' => t('The Bitcoin server returned an invalid address. Please contact the site administrator.')));
       db_query("INSERT INTO {uc_payment_bitcoin} (order_id, bitcoin_address) VALUES (%d, '%s')", $arg1->order_id, $address);
       $message = t('Please send your payment of BTC @total to Bitcoin address @address.', array(
         '@address' => $address,
@@ -244,35 +249,9 @@ function uc_payment_method_bitcoin($op, &$arg1) {
   }
 }
 
-/**
- * Create a jsonrpc_client object to talk to the bitcoin server and return it, or false on failure.
- * @return boolean|jsonrpc_client
- * @todo Add an argument to use in logging which function called it on failure... or figure out the caller itself.
- */
-function _uc_bitcoin_get_bitcoin_client($debug_level = 0) {
-  require_once("xmlrpc.inc");
-  require_once("jsonrpc.inc");
-  $uri = variable_get('uc_bitcoin_server_scheme', 'http') . "://" .
-    variable_get('uc_bitcoin_server_username', 'not') . ":" .
-    variable_get('uc_bitcoin_server_password', 'configured') . "@" .
-    variable_get('uc_bitcoin_server_hostname', 'localhost') . ":" .
-    variable_get('uc_bitcoin_server_port', '8332') . "/";
-  $client = new jsonrpc_client($uri);
-  $client->setDebug($debug_level);
-  $client->setSSLVerifyHost(0);
-  if (variable_get('uc_bitcoin_server_scheme', '') == "https")
-    if (strlen(variable_get('uc_bitcoin_server_certificate_path', '')))
-      $client->setCaCertificate(variable_get('uc_bitcoin_server_certificate_path', ''));
-    else
-      $client->setSSLVerifyPeer(false);
-  $m = new jsonrpcmsg("getinfo");
-  $r = $client->send($m);
-  if ($r->faultCode()) {
-    watchdog('uc_bitcoin', 'Unable to access Bitcoin server. Fault: !fault', array('fault' => $r->faultString()));
-    return false;
-  }
-  return $client;
-}
+/*******************************************************************************
+ * Bitcoin functions and utility functions
+ ******************************************************************************/
 
 /**
  * Check for and try to process pending Bitcoin transactions.
@@ -283,25 +262,19 @@ function uc_bitcoin_cron() {
   // TODO: test if $result has any rows
 
   // prepare the JSON-RPC client
-  if (!$bitcoin_client = _uc_bitcoin_get_bitcoin_client())
-    return;
+  include_once("bitcoin.inc");
+  $bitcoin_client = new BitcoinClient();
+  if (TRUE !== ($fault = $bitcoin_client->can_connect()))
+    return watchdog('uc_bitcoin_cron', 'Unable to access Bitcoin server. Fault: !fault', $fault);
   // loop through the open transactions
   while ($my_order = db_fetch_object($result)) {
     // check for transaction completion
     $address = $my_order->bitcoin_address;
-    $m = new jsonrpcmsg("getreceivedbyaddress");
-    $m->addParam(new jsonrpcval($address));
-    $m->addParam(new jsonrpcval(variable_get("uc_bitcoin_transaction_confirms", 1), "int"));
-    $r = $bitcoin_client->send($m);
-    if ($r->faultCode()) {
-      watchdog('uc_bitcoin', "Bitcoin server communication failed on getreceivedbyaddress !address", array("!address" => $address), WATCHDOG_ALERT);
-      continue;
+    try {
+      $paid = $bitcoin_client->query("getreceivedbyaddress", $address, variable_get("uc_bitcoin_transaction_confirms", 1));
+    } catch (BitcoinClientException $e) {
+      return watchdog('uc_bitcoin', "Bitcoin server communication failed on getreceivedbyaddress !address with fault string !fault", array("!address" => $address, '!fault' => $e . message), WATCHDOG_ALERT);
     }
-    if ($r->value()->kindOf() != "scalar") {
-      watchdog('uc_bitcoin', "getreceivedbyaddress returned something other than a scalar for !address", array("!address" => $address), WATCHDOG_ALERT);
-      continue;
-    }
-    $paid = $r->value()->scalarVal();
     $order_id = $my_order->order_id;
     $order = uc_order_load($order_id);
     $order_balance = uc_payment_balance($order);
@@ -314,30 +287,23 @@ function uc_bitcoin_cron() {
     if ($paid >= $order_total) {
       // PAID IN FULL
       // TODO: If the product was a downloadable, mark the order as completed
-      // not needed since we're using uc_payment_enter?
+      // TODO: next line not needed since we're using uc_payment_enter?
       //uc_order_update_status($order_id, "payment_received");
       uc_order_comment_save($order_id, 9999999, t('Paid in full'), 'order', 'payment_received', TRUE);
       ca_pull_trigger('uc_order_status_email_update', $order);
       continue;
     }
     // NOT PAID YET
-    $m = new jsonrpcmsg("getlabel", array(new jsonrpcval($address)));
-    $r = $bitcoin_client->send($m);
-    if ($r->faultCode()) {
-      watchdog('uc_bitcoin', "Bitcoin server failed on getlabel for !address", array("!address" => $address), WATCHDOG_ALERT);
-      continue;
+    try {
+      $label = $bitcoin_client->query("getlabel", $address);
+    } catch (BitcoinClientException $e) {
+      return watchdog('uc_bitcoin', "Bitcoin server failed on getlabel for !address with fault string !fault", array("!address" => $address, '!fault' => $e . message), WATCHDOG_ALERT);
     }
-    if ($r->value()->kindOf() != "scalar") {
-      watchdog('uc_bitcoin', "getlabel returned something other than a scalar for !address", array("!address" => $address), WATCHDOG_ALERT);
-      continue;
-    }
-    $label = $r->value()->scalarVal();
     list($junk, $junk1, $timestamp) = explode(" ", $label);
     if (time() > ($timestamp + intval(floatval(variable_get("uc_bitcoin_transaction_timeout", 72) * 60 * 60)))) {
       // ORDER EXPIRED
       // TODO: Handle refund of partial payment
       uc_order_update_status($order_id, "canceled");
-      // TODO: Verify working
       $cancelmsg = t("Your payment was not completed with at least !confirms within !timeout hours. Your order has been cancelled. If you have made a partial payment, please contact the shop administrator for a refund.", array(
         '!confirms' => format_plural(variable_get("uc_bitcoin_transaction_confirms", 1), "one confirmation", "@count confirmations"),
         '!timeout' => variable_get("uc_bitcoin_transaction_timeout", 72),
