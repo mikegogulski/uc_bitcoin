@@ -1,7 +1,7 @@
 uc_bitcoin
 ==========
 
-A [Bitcoin][Bitcoin] payment processor plugin for the
+A [Bitcoin][Bitcoin] payment method for the
 [Ubercart][Ubercart] shopping cart for [Drupal][Drupal].
 
 Version: @@uc_bitcoin-version@@
@@ -53,6 +53,7 @@ Configuration
 -------------
 
 * Log into your Drupal installation as an administrator.
+* Navigate to Administer->Site building->Modules and enable the Bitcoin module
 * Navigate to Administer->Store administration->Configuration->Payment settings
 * Click "Edit" at top, then "Payment methods"
 * Enable the Bitcoin payment method and disable all others
