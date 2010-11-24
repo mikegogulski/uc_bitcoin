@@ -45,10 +45,10 @@ function uc_bitcoin_settings_form() {
     '#default_value' => variable_get('uc_bitcoin_server_password', ''),
     '#description' => t('Bitcoin server password'),
   );
-  $form['server']['uc_bitcoin_server_hostname'] = array(
+  $form['server']['uc_bitcoin_server_address'] = array(
     '#type' => 'textfield',
     '#title' => t('Server hostname'),
-    '#default_value' => variable_get('uc_bitcoin_server_hostname', 'localhost'),
+    '#default_value' => variable_get('uc_bitcoin_server_address', 'localhost'),
     '#description' => t('Bitcoin server domain name or IP address. Use "localhost" if bitcoind is running on the Ubercart server.'),
   );
   $form['server']['uc_bitcoin_server_port'] = array(
@@ -102,9 +102,9 @@ function uc_payment_methods_form_validate($form, &$form_state) {
   $c = $form_state['values']['uc_bitcoin_server_password'];
   if (empty($c))
     form_set_error('uc_bitcoin_server_password', t('Server password is required.'));
-  $c = $form_state['values']['uc_bitcoin_server_hostname'];
+  $c = $form_state['values']['uc_bitcoin_server_address'];
   if (empty($c))
-    form_set_error('uc_bitcoin_server_hostname', t('Server hostname is required.'));
+    form_set_error('uc_bitcoin_server_address', t('Server hostname is required.'));
   $c = $form_state['values']['uc_bitcoin_server_port'];
   if (empty($c) || !is_numeric($c) || $c < 0 || $c > 65535 || floatval($c) != intval($c))
     form_set_error('uc_bitcoin_server_port', t('Server port must be an integer and between 0 and 65535.'));
@@ -174,7 +174,12 @@ function uc_bitcoin_order($op, &$arg1, $arg2) {
   switch ($op) {
     case 'submit':
       include_once("bitcoin.inc");
-      $bitcoin_client = new BitcoinClient();
+      $bitcoin_client = new BitcoinClient(variable_get("uc_bitcoin_server_scheme", ""),
+        variable_get("uc_bitcoin_server_username", ""),
+        variable_get("uc_bitcoin_server_password", ""),
+        variable_get("uc_bitcoin_server_address", ""),
+        variable_get("uc_bitcoin_server_port", ""),
+        variable_get("uc_bitcoin_server_certificate_path", ""));
       if (TRUE !== ($fault = $bitcoin_client->can_connect())) {
         watchdog('uc_bitcoin_order', 'Unable to access Bitcoin server. Fault: !fault', $fault);
         return array(array(
@@ -263,7 +268,12 @@ function uc_bitcoin_cron() {
 
   // prepare the JSON-RPC client
   include_once("bitcoin.inc");
-  $bitcoin_client = new BitcoinClient();
+  $bitcoin_client = new BitcoinClient(variable_get("uc_bitcoin_server_scheme", ""),
+    variable_get("uc_bitcoin_server_username", ""),
+    variable_get("uc_bitcoin_server_password", ""),
+    variable_get("uc_bitcoin_server_address", ""),
+    variable_get("uc_bitcoin_server_port", ""),
+    variable_get("uc_bitcoin_server_certificate_path", ""));
   if (TRUE !== ($fault = $bitcoin_client->can_connect()))
     return watchdog('uc_bitcoin_cron', 'Unable to access Bitcoin server. Fault: !fault', $fault);
   // loop through the open transactions
