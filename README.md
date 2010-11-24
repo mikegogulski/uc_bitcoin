@@ -86,7 +86,7 @@ Authors
 Credits
 -------
 
-bitcoin-virtuemart incorporates code from:
+uc_bitcoin incorporates code from:
 
 * [XML-RPC for PHP][XML-RPC-PHP] by Edd Dumbill (for JSON-RPC support)
 * [bitcoin-php][bitcoin-php] by Mike Gogulski (Bitcoin support library)
@@ -94,7 +94,7 @@ bitcoin-virtuemart incorporates code from:
 License
 -------
 
-bitcoin-virtuemart is free and unencumbered public domain software. For more
+uc_bitcoin is free and unencumbered public domain software. For more
 information, see <http://unlicense.org/> or the accompanying UNLICENSE file.
 
 
