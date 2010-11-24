@@ -112,7 +112,7 @@ function uc_payment_methods_form_validate($form, &$form_state) {
   if (empty($c) || !is_numeric($c) || $c <= 0)
     form_set_error('uc_bitcoin_transaction_timeout', t('Transaction timeout must be greater than zero.'));
   $c = $form_state['values']['uc_bitcoin_transaction_confirms'];
-  if (empty($c) || !is_numeric($c) || $c < 0 || floatval($c) != intval($c))
+  if (!is_numeric($c) || $c < 0 || floatval($c) != intval($c))
     form_set_error('uc_bitcoin_transaction_confirms', t('Required transaction confirmations must be an integer greater than or equal to zero.'));
 }
 
