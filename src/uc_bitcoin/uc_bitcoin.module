@@ -189,7 +189,7 @@ function uc_bitcoin_order($op, &$arg1, $arg2) {
       // stuff the order id, the total order price and a timestamp into the bitcoin address's label
       $label = $arg1->order_id . " " . number_format($arg1->order_total, 2, ".", "") . " " . time();
       try {
-        $address = $bitcoin_client->query("getnewaddress");
+        $address = $bitcoin_client->query("getnewaddress", $label);
       } catch (BitcoinClientException $e) {
         watchdog('uc_bitcoin_order', 'getnewaddress failed. Fault: !fault', $fault);
         return array(array('pass' => FALSE, 'message' => t('The Bitcoin server is presently unavailable. Please contact the site administrator.')));
