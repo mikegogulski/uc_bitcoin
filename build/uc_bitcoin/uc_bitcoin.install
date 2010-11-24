@@ -1,0 +1,49 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ *
+ * Provide functions to install and uninstall the Bitcoin
+ * module in the database
+ */
+
+/**
+ * Implementation of hook_schema().
+ */
+function uc_bitcoin_schema() {
+	$schema['uc_payment_bitcoin'] = array(
+		'fields'		=>array(
+			'order_id'			=>array(
+				'type'		=>'int',
+				'unsigned'	=>TRUE,
+				'not null'	=>TRUE,
+				'default'	=>0,
+			),
+			'bitcoin_address'	=>array(
+				'type'		=>'varchar',
+				'length'	=>'50',
+				'not null'	=>TRUE,
+			),
+		),
+		'primary key'	=>array('order_id'),
+		'indexes'		=>array(
+			'bitcoin_address'=>array('bitcoin_address'), ),
+	);
+
+	return $schema;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function uc_bitcoin_install() {
+	drupal_install_schema('uc_bitcoin');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function uc_bitcoin_uninstall() {
+	drupal_uninstall_schema('uc_bitcoin');
+}

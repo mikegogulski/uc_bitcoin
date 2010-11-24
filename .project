@@ -3,6 +3,10 @@
 	<name>uc_bitcoin</name>
 	<comment></comment>
 	<projects>
+		<project>bitcoin-php</project>
+		<project>drupal6</project>
+		<project>token</project>
+		<project>ubercart</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
@@ -13,6 +17,16 @@
 		<buildCommand>
 			<name>org.eclipse.dltk.core.scriptbuilder</name>
 			<arguments>
+			</arguments>
+		</buildCommand>
+		<buildCommand>
+			<name>org.eclipse.ui.externaltools.ExternalToolBuilder</name>
+			<triggers>full,incremental,</triggers>
+			<arguments>
+				<dictionary>
+					<key>LaunchConfigHandle</key>
+					<value>&lt;project&gt;/.externalToolBuilders/New_Builder.launch</value>
+				</dictionary>
 			</arguments>
 		</buildCommand>
 	</buildSpec>
