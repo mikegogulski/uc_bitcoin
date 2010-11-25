@@ -171,7 +171,7 @@ function uc_bitcoin_order($op, &$arg1, $arg2) {
       try {
         $address = $bitcoin_client->query("getnewaddress", $label);
       } catch (BitcoinClientException $e) {
-        watchdog('uc_bitcoin_order', 'getnewaddress failed. Fault: !fault', $fault);
+        watchdog('uc_bitcoin_order', 'getnewaddress failed. Fault: !fault', $e->getMessage());
         return array(array('pass' => FALSE, 'message' => t('The Bitcoin server is presently unavailable. Please contact the site administrator.')));
       }
       if (!Bitcoin::checkAddress($address))
@@ -263,7 +263,7 @@ function uc_bitcoin_cron() {
     try {
       $paid = $bitcoin_client->query("getreceivedbyaddress", $address, variable_get("uc_bitcoin_transaction_confirms", 1));
     } catch (BitcoinClientException $e) {
-      return watchdog('uc_bitcoin', "Bitcoin server communication failed on getreceivedbyaddress !address with fault string !fault", array("!address" => $address, '!fault' => $e . message), WATCHDOG_ALERT);
+      return watchdog('uc_bitcoin', "Bitcoin server communication failed on getreceivedbyaddress !address with fault string !fault", array("!address" => $address, '!fault' => $e->getMessage()), WATCHDOG_ALERT);
     }
     $order_id = $my_order->order_id;
     $order = uc_order_load($order_id);
@@ -287,7 +287,7 @@ function uc_bitcoin_cron() {
     try {
       $label = $bitcoin_client->query("getlabel", $address);
     } catch (BitcoinClientException $e) {
-      return watchdog('uc_bitcoin', "Bitcoin server failed on getlabel for !address with fault string !fault", array("!address" => $address, '!fault' => $e . message), WATCHDOG_ALERT);
+      return watchdog('uc_bitcoin', "Bitcoin server failed on getlabel for !address with fault string !fault", array("!address" => $address, '!fault' => $e->getMessage()), WATCHDOG_ALERT);
     }
     list($junk, $junk1, $timestamp) = explode(" ", $label);
     if (time() > ($timestamp + intval(floatval(variable_get("uc_bitcoin_transaction_timeout", 72) * 60 * 60)))) {
