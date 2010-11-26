@@ -1,8 +1,0 @@
-; $Id$
-name = Bitcoin
-description = Bitcoin payment method
-dependencies[] = uc_order
-dependencies[] = uc_payment
-package = Ubercart - payment
-core = 6.x
-
